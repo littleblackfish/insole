@@ -25,7 +25,7 @@ void draw()
   int radius;
 
   clear();
-  for (int i =0; i<5; i++) sensor[i]=100;
+ // for (int i =0; i<5; i++) sensor[i]=100;
   for (int i =0; i<5; i++) print(sensor[i], ' ');
   print('\n');
 
