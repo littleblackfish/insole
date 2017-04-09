@@ -9,25 +9,45 @@ import static javax.swing.JOptionPane.*;
 Serial myPort;                 // Create object from Serial class
 boolean firstContact = false;  // have we heard from the microcontroller yet?
 
-int nsensor = 8;
-int winSize = 100; 
+final int nsensor = 8;      //number of sensors
+final int bufSize = 1000;   //buffer size limits max window size
 
-byte[][] SerialValue = new byte[winSize][2*nsensor]; //raw sensor values
-float[][]right =  new float[winSize][nsensor/2];
-float[][] left  = new float[winSize][nsensor/2];
-float[][] center = new float[winSize][2];
+final int shortWin = 3;   // fastest motion maps to vertical radius
+final int medWin   = 6;    // slower motion maps to horizontal radius
+final int longWin  = 50;  // slowest motion maps to color
+final int trailSize = 50;
+final int centerWin = 4;
 
 //sensor positions
-int[] leftX  = {233,245,155,200};
-int[] leftY  = {95,185,185,505};
-int[] rightX = {800-leftX[0],800-leftX[1],800-leftX[2], 800-leftX[3]};
-int[] rightY = leftY;
+final int[] leftX  = {233,245,155,200};
+final int[] leftY  = {95,185,185,505};
+final int[] rightX = {800-leftX[0],800-leftX[1],800-leftX[2], 800-leftX[3]};
+final int[] rightY = leftY;
+
+final color red = color(255, 0, 0);
+final color blue = color(0,0,255);
+    
+byte[][] rawRead = new byte[bufSize][2*nsensor]; //raw sensor readings as read from serial
+float[][] right =  new float[bufSize][nsensor/2];
+float[][] left  = new float[bufSize][nsensor/2];
+float[][] center = new float[bufSize][2];
+
+float[] shortSumL = new float[nsensor/2];
+float[] shortSumR = new float[nsensor/2];
+float[] medSumL = new float[nsensor/2];
+float[] medSumR = new float[nsensor/2];
+float[] longSumL = new float[nsensor/2];
+float[] longSumR = new float[nsensor/2];
+float[][] centerSum = new float[bufSize][2];
+
+float[] totalP = new float[bufSize];
 
 float mult = 0.5; //radius multiplier
 
 int t=0;
 
 void setup() {
+  noLoop();
   String COMx, COMlist = "";
 
   size(800, 600);
@@ -63,33 +83,32 @@ void setup() {
     println("Error:", e);
     exit();
   }
+
 }
 void draw() {
-      //old debug code
     clear();
-    float totalP=0;
-    float weight;
-    
+
     // plot the fresh data    
-    fill(color(50, 50, 100));
+    noStroke();
     for (int i = 0; i < nsensor/2; i = i+1) {
-       ellipse(rightX[i],rightY[i], right[t][i], right[t][i] ); 
-       ellipse(leftX[i] , leftY[i], left[t][i] , left [t][i] ); 
-       
-       // modify weigh for sensors 1 and 2
-       if (i==1 || i==2) weight=0.5;
-       else weight = 1 ;
-       
-       center[t][0] += (rightX[i]*right[t][i] + leftX[i]*left[t][i]) *weight;
-       center[t][1] += (rightY[i]*right[t][i] + leftY[i]*left[t][i]) *weight;
-       totalP += (right[t][i]+left[t][i])*weight;
+       fill(lerpColor(blue,red,longSumL[i]/(longWin*128)));
+       ellipse(leftX[i] , leftY[i], medSumL[i]/medWin, shortSumL[i]/shortWin ); 
+       fill(lerpColor(blue,red,longSumR[i]/(longWin*128)));
+       ellipse(rightX[i],rightY[i], medSumR[i]/medWin, shortSumR[i]/shortWin ); 
     }
     
-    //plot center point
-    center[t][0]/=totalP;
-    center[t][1]/=totalP;
-    fill(color(100, 0, 0));
-    ellipse(center[t][0], center[t][1], totalP/nsensor, totalP/nsensor );
+    fill(255,255,255);
+    text(frameRate, 20,20);
+    
+    //track the center with a curve
+    noFill();  
+    stroke(color(0, 255, 0));
+    strokeWeight(3);
+    beginShape();
+    for (int i = (t-trailSize+bufSize)%bufSize ;  i<=t ; i++) {
+      curveVertex(centerSum[i][0]/centerWin, centerSum[i][1]/centerWin);
+    }
+    endShape();
 }
 
 void serialEvent(Serial myPort) {
@@ -103,29 +122,60 @@ void serialEvent(Serial myPort) {
       myPort.buffer(nsensor);
       myPort.write('*');        // ask for more
       t = 0;
+      println("Shook hands with the controller");
     }
-    println("Shook hands with the controller");
+    
   }
   
   else {
-   // println("reading!");
-    t = (t+1)%winSize;
-    int byteCount = myPort.readBytes(SerialValue[t]); //read the next nsensor bytes
+ //   println("reading!");
+    t = (t+1)%bufSize;
+    int byteCount = myPort.readBytes(rawRead[t]); //read the next nsensor bytes
     
     if (byteCount == nsensor) {
+      float weight;
+      totalP[t] = 0;
      
       // map raw byte readings to sensor values
       for (int i = 0; i < nsensor/2; i = i+1) {
-        right[t][i] = (float)  (SerialValue[t][2*i] & 0xff);      
-        left [t][i]  = (float) (SerialValue[t][(2*i)+1] & 0xff) ;
-        right[t][i]*=mult;
+        left [t][i]  = (float) (rawRead[t][(2*i)+1] & 0xff) ;
+        right[t][i] = (float)  (rawRead[t][2*i] & 0xff);      
+
         left[t][i]*=mult;
+        right[t][i]*=mult;
+        
+        // modify weigh for sensors 1 and 2
+        if (i==1 || i==2) weight=0.5;
+        else weight = 1 ;
+        //update center
+        center[t][0] += (rightX[i]*right[t][i] + leftX[i]*left[t][i]) *weight;
+        center[t][1] += (rightY[i]*right[t][i] + leftY[i]*left[t][i]) *weight;
+        totalP[t] += (right[t][i]+left[t][i])*weight;
+        
+        //update moving averages
+        shortSumR[i] += right[t][i] - right[(t+bufSize-shortWin)%bufSize][i];
+        shortSumL[i] += left[t][i] - left[(t+bufSize-shortWin)%bufSize][i];
+        medSumR[i] += right[t][i] - right[(t+bufSize-medWin)%bufSize][i];
+        medSumL[i] += left[t][i] - left[(t+bufSize-medWin)%bufSize][i];
+        longSumR[i] += right[t][i] - right[(t+bufSize-longWin)%bufSize][i];
+        longSumL[i] += left[t][i] - left[(t+bufSize-longWin)%bufSize][i];
       }
+      
+      center[t][0]/=totalP[t];
+      center[t][1]/=totalP[t];
+      totalP[t]/=nsensor;
+      
+      centerSum[t][0] = centerSum[(t+bufSize-1)%bufSize][0]+ center[t][0] - center[(t+bufSize-centerWin)%bufSize][0];
+      centerSum[t][1] = centerSum[(t+bufSize-1)%bufSize][1]+ center[t][1] - center[(t+bufSize-centerWin)%bufSize][1];
+      
+      //draw fresh data
+      redraw();
     }
+
     else {
       println("skipped a frame for some reason");
     }
-  //  for (int i =0; i<nsensor; i++) print(SerialValue[t][i], ' ');
+  //  for (int i =0; i<nsensor; i++) print(rawRead[t][i], ' ');
   //  print('\n');
   //  for (int i =0; i<nsensor/2; i++) print(right[t][i], ' ');
   //  print('\n');
