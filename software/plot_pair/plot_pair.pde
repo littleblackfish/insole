@@ -51,6 +51,7 @@ void setup() {
   String COMx, COMlist = "";
 
   size(800, 600);
+  background(125);
   int baud = 57600;
   //printArray(Serial.list());
   try {
@@ -87,6 +88,8 @@ void setup() {
 }
 void draw() {
     clear();
+    background(125);
+
 
     // plot the fresh data    
     noStroke();
@@ -105,9 +108,13 @@ void draw() {
     stroke(color(0, 255, 0));
     strokeWeight(3);
     beginShape();
+    curveVertex(centerSum[(t-trailSize+bufSize)%bufSize][0]/centerWin, centerSum[(t-trailSize+bufSize)%bufSize][1]/centerWin);
     for (int i = (t-trailSize+bufSize)%bufSize ;  i<=t ; i++) {
       curveVertex(centerSum[i][0]/centerWin, centerSum[i][1]/centerWin);
+    //  stroke(color(t-i));
+
     }
+    curveVertex(centerSum[t][0]/centerWin, centerSum[t][1]/centerWin);
     endShape();
 }
 
